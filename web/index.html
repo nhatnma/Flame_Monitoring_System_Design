@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🔥 ESP32 Fire Detection Dashboard</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+  body {
+    font-family: "Segoe UI", sans-serif;
+    background: linear-gradient(135deg, #6a11cb, #2575fc);
+    color: #fff;
+    margin: 0;
+    padding: 0;
+  }
+
+  h1 {
+    text-align: center;
+    padding: 20px;
+    font-size: 28px;
+    color: #fff;
+    text-shadow: 0 0 8px #0006;
+  }
+
+  .container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 20px;
+    padding: 20px;
+  }
+
+  .card {
+    background: #ffffffee;
+    color: #222;
+    border-radius: 15px;
+    padding: 20px;
+    width: 300px;
+    box-shadow: 0 4px 12px #0003;
+    transition: transform 0.3s;
+  }
+
+  .card:hover {
+    transform: translateY(-5px);
+  }
+
+  .card h2 {
+    margin-top: 0;
+    color: #ff6600;
+  }
+
+  .temp {
+    font-size: 48px;
+    font-weight: bold;
+    color: #27ae60;
+    transition: color 0.3s;
+  }
+
+  .temp.hot {
+    color: #e74c3c;
+    animation: pulse 1s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  .safe {
+    color: #27ae60;
+    font-weight: bold;
+    font-size: 24px;
+  }
+
+  .danger {
+    color: #e74c3c;
+    font-weight: bold;
+    font-size: 24px;
+    animation: blink 1s infinite;
+  }
+
+  @keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0.3; }
+  }
+
+  button {
+    margin: 5px;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: 0.2s;
+    font-size: 14px;
+  }
+
+  button:hover {
+    opacity: 0.85;
+    transform: scale(1.05);
+  }
+
+  button:active {
+    transform: scale(0.98);
+  }
+
+  .on { background: #e74c3c; color: #fff; }
+  .off { background: #2ecc71; color: #fff; }
+  .reset { background: #3498db; color: #fff; }
+
+  .status-indicator {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #95a5a6;
+    margin-left: 8px;
+    animation: blink-slow 2s infinite;
+  }
+
+  .status-indicator.connected {
+    background: #2ecc71;
+    box-shadow: 0 0 10px #2ecc71;
+  }
+
+  @keyframes blink-slow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* --- Nhật ký --- */
+  .log-box {
+    width: 640px;
+    max-height: 200px;
+    overflow-y: auto;
+    background: #ffffffcc;
+    color: #111;
+    font-family: monospace;
+    border-radius: 10px;
+    padding: 10px;
+    box-shadow: inset 0 0 10px #0003;
+    line-height: 1.6;
+    font-size: 13px;
+  }
+
+  .timestamp {
+    color: #555;
+    font-size: 11px;
+    font-weight: bold;
+  }
+
+  .log-info { color: #007acc; }
+  .log-success { color: #16a34a; }
+  .log-warn { color: #eab308; }
+  .log-error { color: #dc2626; font-weight: bold; }
+  .log-default { color: #333; }
+
+  .footer {
+    text-align: center;
+    padding: 10px;
+    color: #eee;
+    font-size: 14px;
+  }
+
+  .threshold-badge {
+    display: inline-block;
+    background: #f39c12;
+    color: white;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: bold;
+    margin-top: 10px;
+  }
+
+  @media (max-width: 700px) {
+    .card, .log-box {
+      width: 90%;
+    }
+  }
+</style>
+</head>
+<body>
+
+<h1>🔥 HỆ THỐNG GIÁM SÁT CHÁY ESP32 <span class="status-indicator" id="statusDot"></span></h1>
+
+<div class="container">
+  <div class="card">
+    <h2>🌡️ Nhiệt độ hiện tại</h2>
+    <div class="temp" id="temp">--°C</div>
+    <div class="threshold-badge">Ngưỡng: <span id="threshold">50</span>°C</div>
+    <p style="margin-top: 10px; color: #7f8c8d; font-size: 13px;">⚠️ Cảnh báo khi vượt ngưỡng</p>
+  </div>
+
+  <div class="card">
+    <h2>🔥 Phát hiện cháy</h2>
+    <h1 id="flameStatus" class="safe">✅ An toàn</h1>
+    <p style="color: #7f8c8d; font-size: 14px;">Dựa trên nhiệt độ DS18B20</p>
+  </div>
+
+  <div class="card">
+    <h2>🔔 Điều khiển</h2>
+    <p>Trạng thái: <span id="alarmStatus" class="safe">Bình thường</span></p>
+    <button id="resetBtn" class="reset">🔄 Reset Alarm</button><br>
+    <button id="buzzerOn" class="on">🔊 Buzzer ON</button>
+    <button id="buzzerOff" class="off">🔇 Buzzer OFF</button>
+  </div>
+
+  <div class="card" style="width:640px">
+    <h2>📝 Nhật ký hoạt động</h2>
+    <div id="log" class="log-box"></div>
+    <button onclick="clearLog()" style="margin-top: 10px; background: #95a5a6; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer;">🗑️ Xóa log</button>
+  </div>
+</div>
+
+<div class="footer">
+  📡 Kết nối MQTT với HiveMQ Cloud | Sensor: DS18B20 | Made with ❤️ by Nam thuộc nhóm 7
+</div>
+
+<script>
+  // MQTT Config
+  // Fill these values locally. Do not commit real MQTT credentials to a public repository.
+  const broker = "wss://YOUR-HIVEMQ-CLUSTER.s1.eu.hivemq.cloud:8884/mqtt";
+  const username = "YOUR_HIVEMQ_USERNAME";
+  const password = "YOUR_HIVEMQ_PASSWORD";
+  const subTopic = "home/fire_sensor/1";
+  const pubTopic = "home/fire_control/1";
+
+  const client = mqtt.connect(broker, {
+    username,
+    password,
+    reconnectPeriod: 2000,
+    clean: true,
+    connectTimeout: 4000
+  });
+
+  const logBox = document.getElementById("log");
+  let lastTemp = null;
+
+  function addLog(msg, type = "default") {
+    const time = new Date().toLocaleTimeString();
+    const p = document.createElement("div");
+    p.classList.add("log-" + type);
+    p.innerHTML = `<span class="timestamp">[${time}]</span> ${msg}`;
+    logBox.prepend(p);
+    
+    // Giới hạn 100 log
+    if (logBox.children.length > 100) {
+      logBox.removeChild(logBox.lastChild);
+    }
+  }
+
+  function clearLog() {
+    logBox.innerHTML = '';
+    addLog("🗑️ Đã xóa log", "info");
+  }
+
+  client.on("connect", () => {
+    addLog("✅ Kết nối MQTT thành công!", "success");
+    document.getElementById("statusDot").classList.add("connected");
+    client.subscribe(subTopic);
+  });
+
+  client.on("reconnect", () => {
+    addLog("🔄 Đang thử kết nối lại MQTT...", "warn");
+    document.getElementById("statusDot").classList.remove("connected");
+  });
+
+  client.on("error", (err) => {
+    addLog("❌ Lỗi MQTT: " + err.message, "error");
+    document.getElementById("statusDot").classList.remove("connected");
+  });
+
+  client.on("message", (topic, message) => {
+    try {
+      const data = JSON.parse(message.toString());
+      
+      // Cập nhật nhiệt độ
+      const temp = parseFloat(data.temperature);
+      const tempEl = document.getElementById("temp");
+      tempEl.textContent = temp.toFixed(1) + "°C";
+      
+      // Đổi màu nhiệt độ
+      const threshold = data.threshold || 50;
+      document.getElementById("threshold").textContent = threshold;
+      
+      if (temp > threshold) {
+        tempEl.classList.add("hot");
+      } else {
+        tempEl.classList.remove("hot");
+      }
+      
+      // Cập nhật trạng thái lửa (dựa vào flame field)
+      const flameStatusEl = document.getElementById("flameStatus");
+      if (data.flame) {
+        flameStatusEl.textContent = "🔥 PHÁT HIỆN CHÁY!";
+        flameStatusEl.className = "danger";
+      } else {
+        flameStatusEl.textContent = "✅ An toàn";
+        flameStatusEl.className = "safe";
+      }
+      
+      // Cập nhật trạng thái alarm
+      const alarmStatusEl = document.getElementById("alarmStatus");
+      if (data.alarm) {
+        alarmStatusEl.textContent = "🚨 Đang báo động!";
+        alarmStatusEl.className = "danger";
+      } else {
+        alarmStatusEl.textContent = "Bình thường";
+        alarmStatusEl.className = "safe";
+      }
+      
+      // Log các sự kiện quan trọng
+      if (data.flame && (!lastTemp || !lastTemp.flame)) {
+        addLog(`🔥🔥🔥 CẢNH BÁO: Phát hiện cháy! Nhiệt độ: ${temp.toFixed(1)}°C`, "error");
+        playAlertSound();
+      } else if (!data.flame && lastTemp && lastTemp.flame) {
+        addLog(`✅ Nhiệt độ trở lại bình thường: ${temp.toFixed(1)}°C`, "success");
+      } else if (Math.abs(temp - (lastTemp?.temperature || temp)) > 5) {
+        addLog(`📊 Nhiệt độ thay đổi đáng kể: ${temp.toFixed(1)}°C`, "warn");
+      } else {
+        addLog(`📩 Dữ liệu: 🌡=${temp.toFixed(1)}°C | 🔥=${data.flame} | 🚨=${data.alarm}`, "info");
+      }
+      
+      lastTemp = data;
+      
+    } catch (e) {
+      addLog("❌ Lỗi parse dữ liệu: " + e.message, "error");
+    }
+  });
+
+  function sendCommand(cmd) {
+    const msg = JSON.stringify(cmd);
+    client.publish(pubTopic, msg);
+    addLog("📤 Gửi lệnh: " + JSON.stringify(cmd), "warn");
+  }
+
+  function playAlertSound() {
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 800;
+      oscillator.type = 'square';
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.5);
+    } catch (e) {
+      console.log("Cannot play sound:", e);
+    }
+  }
+
+  document.getElementById("resetBtn").onclick = () => sendCommand({ command: "reset" });
+  document.getElementById("buzzerOn").onclick = () => sendCommand({ buzzer: "on" });
+  document.getElementById("buzzerOff").onclick = () => sendCommand({ buzzer: "off" });
+</script>
+
+</body>
+</html>
