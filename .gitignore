@@ -6,3 +6,4 @@ desktop.ini
 .env
 .env.*
 node_modules/
+firmware/**/config.h
